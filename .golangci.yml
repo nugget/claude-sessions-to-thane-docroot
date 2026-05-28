@@ -1,0 +1,30 @@
+version: "2"
+linters:
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      require-pkg-doc: true
+    errcheck:
+      check-type-assertions: true
+    staticcheck:
+      checks:
+        - "all"
+        - "-ST1003"
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+        path: _test\.go
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
