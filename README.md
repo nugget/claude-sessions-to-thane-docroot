@@ -16,53 +16,70 @@ the work happened on.
 - **Reads** the JSONL transcripts Claude Code stores under
   `~/.claude/projects/<encoded-project-path>/` (and the worktree-sibling
   directories alongside them).
-- **Writes** a tree of markdown into a target directory you nominate as a Thane
-  document root.
+- **Writes** a tree of markdown into **one shared Thane document root**, with
+  every project under its own `<agent>/<project>/` subtree. A single root holds
+  many projects — registering a separate Thane root per project is an
+  operational headache, so don't.
 
 ```
-<target>/
-  README.md                              # root overview (document_kind: transcript_root_overview)
-  main/
-    README.md                            # per-branch index, sessions in date order
-    2026-05-26 thane-primary-development.md
-  fix/issue-788-close-verifier/
-    README.md
-    2026-04-29 close-the-verifier-bypass.md
-  _unbranched/                           # sessions with no recorded git branch
-    ...
+~/Thane/agentic-coding/                    # the document root (one, shared)
+  claude/
+    thane-ai-agent/                        # one project's subtree
+      README.md                            # project overview (document_kind: transcript_root_overview)
+      main/
+        README.md                          # per-branch index, sessions in date order
+        2026-05-26 thane-primary-development.md
+      fix/issue-788-close-verifier/
+        2026-04-29 close-the-verifier-bypass.md
+      _unbranched/                         # sessions with no recorded git branch
+  codex/
+    some-other-project/                    # a sibling project, exported independently
 ```
 
-Branch names become directories (slashes are preserved as real subdirectories).
-Each session document is named `YYYY-MM-DD <title-slug>.md`.
+Within a project subtree, branch names become directories (slashes are preserved
+as real subdirectories) and each session document is named
+`YYYY-MM-DD <title-slug>.md`. Each project export is scoped to its own subtree,
+so re-running one project never disturbs another.
 
 ## Quick start
 
 ```sh
 # Build it
 just build            # → ./transcript-exporter
-# …or run straight from source
-just run --project thane-ai-agent --target ~/Thane/transcripts --root-name transcripts --dry-run
+# …or preview a run straight from source
+just run --project thane-ai-agent --root ~/Thane/agentic-coding --subpath claude/thane-ai-agent --dry-run
 ```
 
 ```sh
 # Real export (idempotent; safe to re-run)
 transcript-exporter \
-  --project   thane-ai-agent \
-  --target    ~/Thane/transcripts \
-  --root-name transcripts
+  --project thane-ai-agent \
+  --root    ~/Thane/agentic-coding \
+  --subpath claude/thane-ai-agent
 ```
+
+`--root` is the shared document root; `--subpath` is where this project lands
+within it. The root name stamped into every document's `managed_root` derives
+from the root's basename (`agentic-coding` here), so it stays identical across
+every project exported into the same root — nothing to remember, nothing to
+drift.
 
 `--project` accepts any of: a bare project name (matched against the encoded
 project dirs), the project's repo path, or the encoded `~/.claude/projects`
 directory name.
+
+> For a one-off export, a standalone `--target <dir>` (which is then itself the
+> root) also works. `--root` + `--subpath` is the pattern for the shared root.
 
 ### Flags
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--project` | *(required)* | Which Claude project to export. |
-| `--target` | *(required)* | Output document-root directory to sync. |
-| `--root-name` | basename of `--target` | Thane root name; fills frontmatter `managed_root` and `<root>:` refs. |
+| `--root` | *(this or `--target`)* | Shared document-root directory; this project lands under `--subpath`. |
+| `--subpath` | `""` | Relative path within `--root` for this project, e.g. `claude/thane-ai-agent`. |
+| `--target` | *(this or `--root`)* | Standalone directory that is itself the document root (alternative to `--root`). |
+| `--root-name` | basename of `--root`/`--target` | Override the Thane root name in frontmatter (`managed_root`) and `<root>:` refs. |
 | `--worktrees` | `true` | Merge worktree-sibling project dirs into the same root. |
 | `--dry-run` | `false` | Report what would change; write nothing. |
 | `--thinking` | `true` | Include assistant thinking blocks in the narrative. |
@@ -87,7 +104,8 @@ Each session document is a *narrative*, not a JSON dump:
 ## Idempotency / sync model
 
 Output is a deterministic function of the transcripts, so re-running is a
-push-sync of the target directory:
+push-sync of the project's subtree (each export is confined to its own
+`<agent>/<project>/` directory):
 
 - a file is written only when its bytes actually change;
 - documents this tool owns (identified by the `generated_by:
@@ -107,22 +125,26 @@ yourself (see below).
 
 ## Wiring the root into Thane
 
-Register the target directory as a document root in Thane's config. The
-`--root-name` you exported with should match the root key:
+Register the **one** shared root in Thane's config — not one per project. The
+root key matches the root name (the `--root` basename you export with):
 
 ```yaml
 paths:
-  transcripts: ~/Thane/transcripts
+  agentic-coding: ~/Thane/agentic-coding
 
 doc_roots:
-  transcripts:
+  agentic-coding:
     authoring: read_only        # this corpus is generated, not hand-edited
     git:
       enabled: true
-      sign_commits: true        # if YOU commit the target dir with a trusted key
+      sign_commits: true        # if YOU commit the root with a trusted key
       verify_signatures: warn   # or: required
       signing_key: ~/.ssh/id_ed25519
 ```
+
+Thane walks the whole root, so every project subtree (`claude/<project>/`,
+`codex/<project>/`, …) is indexed under the single `agentic-coding` root. Export
+each project with the same `--root`; only `--subpath` changes.
 
 Frontmatter is tailored to Thane's reader on purpose. Its document parser is
 **line-based, not full YAML** — flat keys, scalar / inline-array / block-list

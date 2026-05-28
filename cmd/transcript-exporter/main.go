@@ -4,7 +4,11 @@
 //
 // Usage:
 //
-//	transcript-exporter --project <name|path> --target <dir> [flags]
+//	# one shared root, project under a subpath (recommended for many projects):
+//	transcript-exporter --project <name|path> --root <root-dir> --subpath <agent>/<project>
+//
+//	# or a standalone target that is itself the root:
+//	transcript-exporter --project <name|path> --target <dir>
 package main
 
 import (
@@ -12,6 +16,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/nugget/session-transcript-exporter/internal/docroot"
@@ -28,8 +34,10 @@ func main() {
 func run() error {
 	var (
 		project     = flag.String("project", "", "Claude project to export: a name, the repo path, or the encoded ~/.claude/projects dir")
-		target      = flag.String("target", "", "target document-root directory to sync (required)")
-		rootName    = flag.String("root-name", "", "thane root name for frontmatter/refs (default: basename of --target)")
+		root        = flag.String("root", "", "shared document-root directory; project docs land under --subpath. root-name derives from its basename")
+		subpath     = flag.String("subpath", "", "relative path within --root for this project's docs, e.g. claude/thane-ai-agent")
+		target      = flag.String("target", "", "standalone target directory that is itself the document root (alternative to --root)")
+		rootName    = flag.String("root-name", "", "override the thane root name for frontmatter/refs (default: basename of --root or --target)")
 		worktrees   = flag.Bool("worktrees", true, "merge worktree-sibling project dirs into the same root")
 		dryRun      = flag.Bool("dry-run", false, "report changes without writing to disk")
 		thinking    = flag.Bool("thinking", true, "include assistant thinking blocks in the narrative")
@@ -41,9 +49,14 @@ func run() error {
 	)
 	flag.Parse()
 
-	if *project == "" || *target == "" {
+	if *project == "" {
 		flag.Usage()
-		return fmt.Errorf("both --project and --target are required")
+		return fmt.Errorf("--project is required")
+	}
+	targetDir, resolvedRootName, err := resolveLocation(*root, *subpath, *target, *rootName)
+	if err != nil {
+		flag.Usage()
+		return err
 	}
 
 	loc, err := loadLocation(*tz)
@@ -59,8 +72,8 @@ func run() error {
 
 	cfg := export.Config{
 		ProjectArg:       *project,
-		TargetDir:        *target,
-		RootName:         *rootName,
+		TargetDir:        targetDir,
+		RootName:         resolvedRootName,
 		IncludeWorktrees: *worktrees,
 		DryRun:           *dryRun,
 		IncludeThinking:  *thinking,
@@ -77,6 +90,49 @@ func run() error {
 	}
 	printSummary(result, *dryRun)
 	return nil
+}
+
+// resolveLocation turns the location flags into the concrete write directory
+// and the thane root name. Either --root (with optional --subpath) or --target
+// must be given, but not both. With --root the root name derives from the
+// root's basename so it stays stable across every project written under the
+// same shared root; --root-name overrides it.
+func resolveLocation(root, subpath, target, rootName string) (dir, name string, err error) {
+	root = strings.TrimSpace(root)
+	target = strings.TrimSpace(target)
+	subpath = strings.TrimSpace(subpath)
+	rootName = strings.TrimSpace(rootName)
+
+	switch {
+	case root != "" && target != "":
+		return "", "", fmt.Errorf("use either --root or --target, not both")
+	case root == "" && target == "":
+		return "", "", fmt.Errorf("one of --root or --target is required")
+	case target != "":
+		if subpath != "" {
+			return "", "", fmt.Errorf("--subpath requires --root")
+		}
+		return target, defaultName(rootName, target), nil
+	default: // root set
+		clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(subpath)))
+		if filepath.IsAbs(subpath) || clean == ".." || strings.HasPrefix(clean, "../") {
+			return "", "", fmt.Errorf("--subpath %q must stay within --root", subpath)
+		}
+		dir = root
+		if clean != "" && clean != "." {
+			dir = filepath.Join(root, filepath.FromSlash(clean))
+		}
+		return dir, defaultName(rootName, root), nil
+	}
+}
+
+// defaultName returns the explicit root name, or the basename of path when none
+// was given.
+func defaultName(rootName, path string) string {
+	if rootName != "" {
+		return rootName
+	}
+	return filepath.Base(filepath.Clean(path))
 }
 
 func loadLocation(name string) (*time.Location, error) {
