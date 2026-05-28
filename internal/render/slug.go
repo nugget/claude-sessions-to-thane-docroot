@@ -5,8 +5,6 @@ import (
 	"unicode"
 )
 
-const unbranchedDir = "_unbranched"
-
 // Slug converts arbitrary text into a filesystem- and URL-friendly token:
 // lowercase, alphanumerics kept, everything else collapsed to single hyphens.
 func Slug(s string) string {
@@ -42,40 +40,6 @@ func clampSlug(s string, max int) string {
 		cut = cut[:i]
 	}
 	return strings.Trim(cut, "-")
-}
-
-// BranchDir maps a git branch name to a relative directory. Slashes are
-// preserved as real subdirectories; each segment is sanitized to safe
-// characters. An empty branch lands in the unbranched directory.
-func BranchDir(branch string) string {
-	branch = strings.TrimSpace(branch)
-	if branch == "" {
-		return unbranchedDir
-	}
-	segments := strings.Split(branch, "/")
-	out := make([]string, 0, len(segments))
-	for _, seg := range segments {
-		if clean := sanitizeSegment(seg); clean != "" {
-			out = append(out, clean)
-		}
-	}
-	if len(out) == 0 {
-		return unbranchedDir
-	}
-	return strings.Join(out, "/")
-}
-
-func sanitizeSegment(seg string) string {
-	var b strings.Builder
-	for _, r := range seg {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.' || r == '_' || r == '-':
-			b.WriteRune(r)
-		default:
-			b.WriteByte('-')
-		}
-	}
-	return strings.Trim(b.String(), "-. ")
 }
 
 // hrefEncode makes a relative file path safe to use as a markdown link target,

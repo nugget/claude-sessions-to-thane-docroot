@@ -7,32 +7,25 @@ import (
 	"time"
 )
 
-// RenderBranchIndex builds the README.md for one branch directory: a
-// chronological table of contents for the sessions that landed there.
-func RenderBranchIndex(g *BranchGroup, opts Options) string {
+// RenderMonthIndex builds the README.md for one month directory: a chronological
+// table of contents for the sessions that started that month.
+func RenderMonthIndex(g *MonthGroup, opts Options) string {
 	loc := opts.loc()
-	label := g.Branch
-	if label == "" {
-		label = "Unbranched sessions"
-	}
+	label := monthLabel(g.Month)
 
 	first, last := groupSpan(g)
-	synopsis := fmt.Sprintf("%s on branch %s.", countNoun(len(g.Sessions), "development session"), backtick(g.Branch))
-	if g.Branch == "" {
-		synopsis = fmt.Sprintf("%s with no recorded git branch.", countNoun(len(g.Sessions), "development session"))
-	}
+	synopsis := fmt.Sprintf("%s in %s.", countNoun(len(g.Sessions), "development session"), label)
 	if span := spanText(first, last, loc); span != "" {
 		synopsis += " " + span
 	}
 
 	fm := Frontmatter{
-		Title:           "Branch: " + label,
+		Title:           label + " — sessions",
 		Summary:         synopsis,
-		Tags:            indexTags(g),
+		Tags:            []string{"transcript", "index", g.Month},
 		GeneratedAt:     rfc3339(last),
-		DocumentKind:    KindBranch,
+		DocumentKind:    KindMonth,
 		RefreshStrategy: "replace",
-		SourceRefs:      branchIndexRefs(g, opts.RootName),
 		ManagedRoot:     opts.RootName,
 		Created:         rfc3339(first),
 		Updated:         rfc3339(last),
@@ -41,7 +34,7 @@ func RenderBranchIndex(g *BranchGroup, opts Options) string {
 	var b strings.Builder
 	b.WriteString(fm.Render())
 	b.WriteByte('\n')
-	fmt.Fprintf(&b, "# Branch: %s\n\n", label)
+	fmt.Fprintf(&b, "# %s\n\n", label)
 	b.WriteString(synopsis)
 	b.WriteString("\n\n## Sessions\n\n")
 	for _, p := range g.Sessions {
@@ -52,8 +45,7 @@ func RenderBranchIndex(g *BranchGroup, opts Options) string {
 
 func writeSessionRow(b *strings.Builder, p *Placement, loc *time.Location) {
 	s := p.Session
-	date := fmtDate(s.StartedAt, loc)
-	fmt.Fprintf(b, "- **%s** — [%s](<%s>)", date, oneLine(s.Title()), hrefEncode(p.FileName))
+	fmt.Fprintf(b, "- **%s** — [%s](<%s>)", fmtRowStamp(s.StartedAt, loc), oneLine(s.Title()), hrefEncode(p.FileName))
 	if len(s.PRs) > 0 {
 		nums := make([]string, 0, len(s.PRs))
 		for _, pr := range s.PRs {
@@ -65,20 +57,31 @@ func writeSessionRow(b *strings.Builder, p *Placement, loc *time.Location) {
 			fmt.Fprintf(b, " · PR %s", strings.Join(nums, ", "))
 		}
 	}
+	if brs := s.TouchedBranches(); len(brs) > 0 {
+		fmt.Fprintf(b, " · %s", branchHint(brs))
+	}
 	b.WriteString("\n")
 	if syn := s.Synopsis(); syn != "" && !strings.EqualFold(syn, s.Title()) {
 		fmt.Fprintf(b, "  - %s\n", oneLine(syn))
 	}
 }
 
-// RenderRootOverview builds the document-root README: the entry point that
-// frames the whole corpus and links every branch index.
-func RenderRootOverview(project string, groups []*BranchGroup, opts Options) string {
+// branchHint renders a compact branch summary for an index row.
+func branchHint(branches []string) string {
+	if len(branches) == 1 {
+		return codeSpan(branches[0])
+	}
+	return fmt.Sprintf("%s +%d", codeSpan(branches[0]), len(branches)-1)
+}
+
+// RenderRootOverview builds the document-root README for this project: the entry
+// point that frames the corpus and links each month index.
+func RenderRootOverview(project string, groups []*MonthGroup, opts Options) string {
 	loc := opts.loc()
 	total, first, last, prCount := corpusStats(groups)
 
 	synopsis := fmt.Sprintf("Development session transcripts for %s, exported as primary source material for tracing the project's development narrative. %s across %s.",
-		project, countNoun(total, "session"), countNoun(len(groups), "branch"))
+		project, countNoun(total, "session"), countNoun(len(groups), "month"))
 	if span := spanText(first, last, loc); span != "" {
 		synopsis += " " + span
 	}
@@ -107,45 +110,37 @@ func RenderRootOverview(project string, groups []*BranchGroup, opts Options) str
 		fmt.Fprintf(&b, "%s linked across the corpus.\n\n", countNoun(prCount, "pull request"))
 	}
 
-	b.WriteString("## Branches\n\n")
+	b.WriteString("## Months\n\n")
 	for _, g := range groups {
-		writeBranchRow(&b, g, loc)
+		writeMonthRow(&b, g, loc)
 	}
 	return b.String()
 }
 
-func writeBranchRow(b *strings.Builder, g *BranchGroup, loc *time.Location) {
-	label := g.Branch
-	if label == "" {
-		label = "Unbranched"
-	}
-	_, last := groupSpan(g)
+func writeMonthRow(b *strings.Builder, g *MonthGroup, _ *time.Location) {
 	indexPath := g.Dir + "/README.md"
-	fmt.Fprintf(b, "- [%s](<%s>) — %s", label, hrefEncode(indexPath), countNoun(len(g.Sessions), "session"))
-	if !last.IsZero() {
-		fmt.Fprintf(b, ", latest %s", fmtDate(last, loc))
-	}
-	b.WriteString("\n")
+	fmt.Fprintf(b, "- [%s](<%s>) — %s\n", monthLabel(g.Month), hrefEncode(indexPath), countNoun(len(g.Sessions), "session"))
 }
 
 // --- helpers ---
 
-func indexTags(g *BranchGroup) []string {
-	tags := []string{"transcript", "index"}
-	if g.Branch != "" {
-		tags = append(tags, Slug(g.Branch))
+// monthLabel turns a "YYYY-MM" directory name into a human label; anything that
+// doesn't parse (i.e. the undated bucket) renders as "Undated".
+func monthLabel(month string) string {
+	if t, err := time.Parse("2006-01", month); err == nil {
+		return t.Format("January 2006")
 	}
-	return tags
+	return "Undated"
 }
 
-func branchIndexRefs(g *BranchGroup, root string) []string {
-	if g.Branch == "" {
-		return nil
+func fmtRowStamp(t time.Time, loc *time.Location) string {
+	if t.IsZero() {
+		return "undated"
 	}
-	return []string{"branch:" + g.Branch}
+	return t.In(loc).Format("2006-01-02 15:04")
 }
 
-func groupSpan(g *BranchGroup) (first, last time.Time) {
+func groupSpan(g *MonthGroup) (first, last time.Time) {
 	for _, p := range g.Sessions {
 		s := p.Session
 		if !s.StartedAt.IsZero() && (first.IsZero() || s.StartedAt.Before(first)) {
@@ -158,7 +153,7 @@ func groupSpan(g *BranchGroup) (first, last time.Time) {
 	return first, last
 }
 
-func corpusStats(groups []*BranchGroup) (sessions int, first, last time.Time, prs int) {
+func corpusStats(groups []*MonthGroup) (sessions int, first, last time.Time, prs int) {
 	for _, g := range groups {
 		sessions += len(g.Sessions)
 		gf, gl := groupSpan(g)
@@ -214,11 +209,4 @@ func endsInVowelY(noun string) bool {
 		return true
 	}
 	return false
-}
-
-func backtick(s string) string {
-	if s == "" {
-		return ""
-	}
-	return "`" + s + "`"
 }

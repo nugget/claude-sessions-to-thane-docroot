@@ -22,24 +22,27 @@ the work happened on.
   operational headache, so don't.
 
 ```
-~/Thane/agentic-coding/                    # the document root (one, shared)
+~/Thane/agentic-coding/                        # the document root (one, shared)
   claude/
-    thane-ai-agent/                        # one project's subtree
-      README.md                            # project overview (document_kind: transcript_root_overview)
-      main/
-        README.md                          # per-branch index, sessions in date order
-        2026-05-26 thane-primary-development.md
-      fix/issue-788-close-verifier/
-        2026-04-29 close-the-verifier-bypass.md
-      _unbranched/                         # sessions with no recorded git branch
+    thane-ai-agent/                            # one project's subtree
+      README.md                                # project overview (document_kind: transcript_root_overview)
+      2026-05/
+        README.md                              # month index, sessions in time order
+        2026-05-26 1431 thane-primary-development.md
+      2026-04/
+        2026-04-29 0915 close-the-verifier-bypass.md
   codex/
-    some-other-project/                    # a sibling project, exported independently
+    some-other-project/                        # a sibling project, exported independently
 ```
 
-Within a project subtree, branch names become directories (slashes are preserved
-as real subdirectories) and each session document is named
-`YYYY-MM-DD <title-slug>.md`. Each project export is scoped to its own subtree,
-so re-running one project never disturbs another.
+The **session** is the unit of continuity, so within a project subtree sessions
+are organized **chronologically** by calendar month (`YYYY-MM/`), one document
+per session named `YYYY-MM-DD HHMM <title-slug>.md`. A single session usually
+spans several branches — sometimes interleaved — so branch is *not* the folder:
+each session records every branch it touched in frontmatter and the Overview,
+and marks inline where the working branch switches mid-conversation. Each project
+export is scoped to its own subtree, so re-running one project never disturbs
+another.
 
 ## Quick start
 
@@ -95,11 +98,34 @@ Each session document is a *narrative*, not a JSON dump:
 
 - a lead paragraph (the opening request) — **this is what Thane indexes as the
   document summary**;
-- an **Overview** (time span, branch(es), working dir, activity counts, tools
-  used, linked PRs, Claude Code version);
+- an **Overview** (time span, every branch touched, working dir, activity counts,
+  tools used, linked PRs, Claude Code version);
 - a **Conversation** section: human prompts (block-quoted), assistant prose,
   thinking (collapsible), tool calls humanized to one line with their output
-  folded into `<details>`, and PR links.
+  folded into `<details>`, PR links, and `⎇` markers wherever the working branch
+  switches so interleaved cross-branch work stays legible.
+
+Chronologically adjacent sessions are linked at the foot of each document
+(← previous / next →), giving the whole corpus a continuous spine across months.
+
+### Forked sessions
+
+Forking a session in the Claude UI writes a new transcript that **copies the
+parent's conversation prefix verbatim** — and those copied records keep the
+*parent's* session id; only the divergent tail carries the fork's own id (which
+is the filename). The exporter handles this so forks don't pollute the corpus:
+
+- the canonical session id comes from the **filename**, so each fork gets its
+  own `conversation:` ref (not the parent's);
+- the session is dated from its **divergence point** (first own message), so
+  forks sort to when their work actually happened — not when the parent began;
+- the copied prefix is **not repeated**; the document renders only the fork's
+  own work, led by a fork note that links the parent and a `forked-from:<id>`
+  source-ref (`> 🍴 Forked from [parent] — N earlier messages … not repeated here`).
+
+A non-forked session has no inherited prefix and is unaffected. The detection is
+data-driven (it only triggers when records actually carry a different id), so it
+degrades gracefully if Claude Code's fork format ever changes.
 
 ## Idempotency / sync model
 
@@ -204,8 +230,10 @@ Common changes and where they live:
   `humanizeTool` in `internal/transcript/tools.go`. Return a one-line summary,
   optional detail, and (for dispatchers) a `SubagentRef`.
 - **Change the directory layout or filenames:** `placeSessions` /
-  `assignFilenames` in `internal/export/export.go`, plus `BranchDir` / `Slug` in
+  `monthDir` / `sessionFileName` in `internal/export/export.go`, plus `Slug` in
   `internal/render/slug.go`.
+- **Change how branch switches appear:** `writeBranchMarker` /
+  `writeConversation` in `internal/render/session.go`.
 - **Add or change a frontmatter field:** `Frontmatter` + `Render` in
   `internal/render/frontmatter.go`, and the builders in `render/session.go` /
   `render/index.go`. Keep to Thane's parseable subset (flat keys; scalars or

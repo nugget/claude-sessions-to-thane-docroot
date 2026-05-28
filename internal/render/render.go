@@ -21,7 +21,7 @@ const GeneratedBy = "session-transcript-exporter"
 // Document kinds surfaced in frontmatter for the reader.
 const (
 	KindSession  = "session_transcript"
-	KindBranch   = "transcript_branch_index"
+	KindMonth    = "transcript_month_index"
 	KindOverview = "transcript_root_overview"
 )
 
@@ -51,16 +51,17 @@ func (o Options) maxThinking() int {
 
 // Placement is a session assigned to its destination within the document root.
 type Placement struct {
-	Session   *transcript.Session
-	Branch    string // raw home branch ("" when none)
-	BranchDir string // sanitized relative directory (forward slashes)
-	FileName  string // e.g. "2026-05-26 adopt-trailhead.md"
-	RelPath   string // BranchDir + "/" + FileName
+	Session  *transcript.Session
+	FileName string // e.g. "2026-05-26 1431 adopt-trailhead.md"
+	RelPath  string // MonthGroup.Dir + "/" + FileName
 }
 
-// BranchGroup is the set of sessions whose home branch lands in one directory.
-type BranchGroup struct {
-	Branch   string // representative raw branch label ("" → unbranched)
-	Dir      string // relative directory (e.g. "claude/archive-layout-migration")
+// MonthGroup is the set of sessions that started in one calendar month. The
+// session — not the branch — is the unit of continuity, so sessions are
+// organized chronologically; branches are recorded as metadata within each
+// document instead of fragmenting it across folders.
+type MonthGroup struct {
+	Month    string // "YYYY-MM"
+	Dir      string // relative directory (== Month, or "undated")
 	Sessions []*Placement
 }

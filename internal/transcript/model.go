@@ -15,6 +15,14 @@ type Session struct {
 	AITitle     string // model-generated title (ai-title entry)
 	FirstPrompt string // text of the first genuine human prompt
 
+	// ForkedFrom is the session id this one was forked from in the Claude UI,
+	// empty when the session is not a fork. A fork's transcript copies the
+	// parent's conversation prefix verbatim (those records keep the parent's
+	// id); ForkedFrom is the immediate parent, and InheritedMessages counts the
+	// copied messages that this document does not repeat.
+	ForkedFrom        string
+	InheritedMessages int
+
 	StartedAt time.Time
 	EndedAt   time.Time
 

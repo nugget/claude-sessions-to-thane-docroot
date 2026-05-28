@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -84,16 +85,18 @@ func ParseFile(path string, opts Options) (*Session, error) {
 
 func parse(r io.Reader, path string, opts Options) (*Session, error) {
 	opts = opts.withDefaults()
+	canonicalID := sessionIDFromPath(path)
 	p := &parser{
-		opts:       opts,
-		sess:       &Session{SourceFile: path},
-		toolByID:   make(map[string]*ToolCall),
-		pending:    make(map[string]pendingResult),
-		branchHits: make(map[string]int),
-		branchLast: make(map[string]int),
-		toolHits:   make(map[string]int),
-		seenCWD:    make(map[string]bool),
-		seenPR:     make(map[string]bool),
+		opts:        opts,
+		sess:        &Session{SourceFile: path, ID: canonicalID},
+		canonicalID: canonicalID,
+		toolByID:    make(map[string]*ToolCall),
+		pending:     make(map[string]pendingResult),
+		branchHits:  make(map[string]int),
+		branchLast:  make(map[string]int),
+		toolHits:    make(map[string]int),
+		seenCWD:     make(map[string]bool),
+		seenPR:      make(map[string]bool),
 	}
 
 	br := bufio.NewReader(r)
@@ -124,6 +127,11 @@ type parser struct {
 	opts Options
 	sess *Session
 
+	canonicalID   string // the session's own id (filename stem)
+	ownStarted    bool   // seen the first own message (the fork divergence point)
+	parentID      string // immediate parent id while in the inherited prefix
+	inheritedMsgs int    // copied prefix messages skipped
+
 	toolByID   map[string]*ToolCall
 	pending    map[string]pendingResult // results seen before their tool_use
 	branchHits map[string]int
@@ -143,10 +151,39 @@ type pendingResult struct {
 }
 
 func (p *parser) handle(e *rawEntry) {
-	if e.SessionID != "" && p.sess.ID == "" {
+	// Without a reliable filename id, fall back to the first record's id; the
+	// fork-prefix detection then no-ops (every record looks "own").
+	if p.canonicalID == "" && e.SessionID != "" {
+		p.canonicalID = e.SessionID
 		p.sess.ID = e.SessionID
 	}
+
+	isMessage := e.Type == "user" || e.Type == "assistant"
+	if !p.isOwn(e) {
+		// Copied conversation prefix from a parent session: a fork keeps the
+		// parent's sessionId on the inherited records. Count it, remember the
+		// immediate parent, and skip — the fork document doesn't repeat it.
+		if isMessage {
+			p.inheritedMsgs++
+			p.parentID = e.SessionID
+		}
+		return
+	}
 	ts := parseTime(e.Timestamp)
+	if isMessage && !p.ownStarted {
+		p.ownStarted = true
+		if p.inheritedMsgs > 0 {
+			p.sess.ForkedFrom = p.parentID
+			p.sess.InheritedMessages = p.inheritedMsgs
+			// Anchor the fork to its divergence point. Own metadata
+			// (queue-op/title) before the first own message can carry an
+			// earlier timestamp; the fork's work begins here, and from now on
+			// observeMeta leaves StartedAt alone (see the ForkedFrom guard).
+			if !ts.IsZero() {
+				p.sess.StartedAt = ts
+			}
+		}
+	}
 	p.observeMeta(e, ts)
 
 	switch e.Type {
@@ -168,9 +205,24 @@ func (p *parser) handle(e *rawEntry) {
 	// last-prompt, attachment, system, queue-operation: intentionally ignored.
 }
 
+// isOwn reports whether a record belongs to this session rather than to a parent
+// it was forked from. A fork's copied prefix carries the parent's sessionId;
+// everything the fork itself produced carries the canonical (filename) id.
+// Records without a sessionId (rare metadata) are treated as own.
+func (p *parser) isOwn(e *rawEntry) bool {
+	return e.SessionID == "" || e.SessionID == p.canonicalID
+}
+
+func sessionIDFromPath(path string) string {
+	return strings.TrimSuffix(filepath.Base(path), ".jsonl")
+}
+
 func (p *parser) observeMeta(e *rawEntry, ts time.Time) {
 	if !ts.IsZero() {
-		if p.sess.StartedAt.IsZero() || ts.Before(p.sess.StartedAt) {
+		// For a fork, StartedAt is pinned to the first own message (the
+		// divergence point) and must not drift to an earlier own-metadata
+		// timestamp; for a non-fork it tracks the earliest record as usual.
+		if p.sess.ForkedFrom == "" && (p.sess.StartedAt.IsZero() || ts.Before(p.sess.StartedAt)) {
 			p.sess.StartedAt = ts
 		}
 		if ts.After(p.sess.EndedAt) {

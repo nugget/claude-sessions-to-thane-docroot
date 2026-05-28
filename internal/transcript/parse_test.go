@@ -3,6 +3,7 @@ package transcript
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 const sampleJSONL = `{"type":"queue-operation","operation":"enqueue","sessionId":"11111111-aaaa-bbbb","timestamp":"2026-05-01T10:00:00Z"}
@@ -20,7 +21,7 @@ const sampleJSONL = `{"type":"queue-operation","operation":"enqueue","sessionId"
 
 func parseSample(t *testing.T) *Session {
 	t.Helper()
-	s, err := parse(strings.NewReader(sampleJSONL), "sample.jsonl", Options{})
+	s, err := parse(strings.NewReader(sampleJSONL), "11111111-aaaa-bbbb.jsonl", Options{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -52,6 +53,50 @@ func TestParseSessionMetadata(t *testing.T) {
 	}
 	if s.ToolCalls != 2 {
 		t.Errorf("ToolCalls = %d, want 2", s.ToolCalls)
+	}
+	if s.ForkedFrom != "" || s.InheritedMessages != 0 {
+		t.Errorf("non-fork session should have no fork metadata: from=%q inherited=%d", s.ForkedFrom, s.InheritedMessages)
+	}
+}
+
+const forkJSONL = `{"type":"custom-title","customTitle":"Fork session","sessionId":"fork99"}
+{"type":"user","sessionId":"parent11","timestamp":"2026-05-01T10:00:00Z","gitBranch":"main","message":{"role":"user","content":"Original parent question."}}
+{"type":"assistant","sessionId":"parent11","timestamp":"2026-05-01T10:00:05Z","gitBranch":"main","message":{"role":"assistant","content":[{"type":"text","text":"Parent answer."}]}}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-05-02T14:29:59Z","sessionId":"fork99"}
+{"type":"user","sessionId":"fork99","timestamp":"2026-05-02T14:30:00Z","gitBranch":"feature/z","message":{"role":"user","content":"Now diverge and do the new thing."}}
+{"type":"assistant","sessionId":"fork99","timestamp":"2026-05-02T14:31:00Z","gitBranch":"feature/z","message":{"role":"assistant","content":[{"type":"text","text":"Doing the new thing."}]}}
+`
+
+func TestParseForkTrimsInheritedPrefix(t *testing.T) {
+	s, err := parse(strings.NewReader(forkJSONL), "fork99.jsonl", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.ID != "fork99" {
+		t.Errorf("ID = %q, want fork99 (filename id, not the parent in copied records)", s.ID)
+	}
+	if s.ForkedFrom != "parent11" {
+		t.Errorf("ForkedFrom = %q, want parent11", s.ForkedFrom)
+	}
+	if s.InheritedMessages != 2 {
+		t.Errorf("InheritedMessages = %d, want 2", s.InheritedMessages)
+	}
+	if got := s.StartedAt.UTC().Format(time.RFC3339); got != "2026-05-02T14:30:00Z" {
+		t.Errorf("StartedAt = %s, want the divergence point 2026-05-02T14:30:00Z (not the copied prefix)", got)
+	}
+	if s.FirstPrompt != "Now diverge and do the new thing." {
+		t.Errorf("FirstPrompt = %q, want the first OWN prompt", s.FirstPrompt)
+	}
+	if s.UserTurns != 1 {
+		t.Errorf("UserTurns = %d, want 1 (own work only)", s.UserTurns)
+	}
+	if hb := s.HomeBranch(); hb != "feature/z" {
+		t.Errorf("HomeBranch = %q, want feature/z (own); main belonged to the inherited prefix", hb)
+	}
+	for _, ev := range s.Events {
+		if strings.Contains(ev.Text, "Original parent question") || strings.Contains(ev.Text, "Parent answer") {
+			t.Errorf("inherited prefix must not be rendered as events; leaked: %q", ev.Text)
+		}
 	}
 }
 
@@ -122,7 +167,7 @@ func TestParseEmptyInputIsSafe(t *testing.T) {
 
 func TestParseSkipsMalformedLines(t *testing.T) {
 	in := "{not json}\n" + sampleJSONL
-	s, err := parse(strings.NewReader(in), "x.jsonl", Options{})
+	s, err := parse(strings.NewReader(in), "11111111-aaaa-bbbb.jsonl", Options{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -10,9 +11,10 @@ import (
 )
 
 // RenderSession produces the full markdown document for one session. prev and
-// next are the chronologically adjacent sessions in the same branch (either may
-// be nil) and are linked for narrative navigation.
-func RenderSession(p *Placement, prev, next *Placement, opts Options) string {
+// next are the chronologically adjacent sessions (either may be nil) and are
+// linked for narrative navigation. parent is the session this one was forked
+// from, when present in the corpus, and is linked from the fork note.
+func RenderSession(p *Placement, prev, next, parent *Placement, opts Options) string {
 	s := p.Session
 
 	var b strings.Builder
@@ -24,6 +26,7 @@ func RenderSession(p *Placement, prev, next *Placement, opts Options) string {
 	b.WriteString(s.Synopsis())
 	b.WriteString("\n\n")
 
+	writeForkNote(&b, p, parent)
 	writeOverview(&b, s, opts)
 
 	b.WriteString("## Conversation\n\n")
@@ -54,9 +57,6 @@ func sessionTags(s *transcript.Session) []string {
 	if !s.StartedAt.IsZero() {
 		tags = append(tags, strconv.Itoa(s.StartedAt.UTC().Year()))
 	}
-	if hb := s.HomeBranch(); hb != "" {
-		tags = append(tags, Slug(hb))
-	}
 	if len(s.PRs) > 0 {
 		tags = append(tags, "has-pr")
 	}
@@ -65,6 +65,9 @@ func sessionTags(s *transcript.Session) []string {
 
 func sessionSourceRefs(s *transcript.Session, root string) []string {
 	refs := []string{"conversation:" + s.ID}
+	if s.ForkedFrom != "" {
+		refs = append(refs, "forked-from:"+s.ForkedFrom)
+	}
 	for _, br := range s.TouchedBranches() {
 		refs = append(refs, "branch:"+br)
 	}
@@ -86,21 +89,21 @@ func writeOverview(b *strings.Builder, s *transcript.Session, opts Options) {
 	if when := timeRange(s, loc); when != "" {
 		fmt.Fprintf(b, "- **When:** %s\n", when)
 	}
-	if hb := s.HomeBranch(); hb != "" {
-		line := "`" + hb + "`"
-		if len(s.Branches) > 1 {
-			others := make([]string, 0, len(s.Branches)-1)
-			for _, br := range s.Branches[1:] {
-				others = append(others, "`"+br.Branch+"`")
-			}
-			line += fmt.Sprintf(" — also touched %s", strings.Join(others, ", "))
+	if len(s.Branches) > 0 {
+		names := make([]string, 0, len(s.Branches))
+		for _, br := range s.Branches {
+			names = append(names, codeSpan(br.Branch))
 		}
-		fmt.Fprintf(b, "- **Branch:** %s\n", line)
+		label := "Branch"
+		if len(names) > 1 {
+			label = "Branches"
+		}
+		fmt.Fprintf(b, "- **%s:** %s\n", label, strings.Join(names, ", "))
 	}
 	if len(s.CWDs) > 0 {
 		dirs := make([]string, len(s.CWDs))
 		for i, d := range s.CWDs {
-			dirs[i] = "`" + d + "`"
+			dirs[i] = codeSpan(d)
 		}
 		fmt.Fprintf(b, "- **Working directory:** %s\n", strings.Join(dirs, ", "))
 	}
@@ -125,8 +128,15 @@ func writeOverview(b *strings.Builder, s *transcript.Session, opts Options) {
 
 func writeConversation(b *strings.Builder, s *transcript.Session, opts Options) {
 	promptNo := 0
+	currentBranch := ""
 	for i := range s.Events {
 		ev := &s.Events[i]
+		// A session interleaves work across branches; surface each switch so
+		// the movement is visible even though the document isn't filed by branch.
+		if ev.Branch != "" && ev.Branch != currentBranch {
+			writeBranchMarker(b, ev.Branch, currentBranch == "")
+			currentBranch = ev.Branch
+		}
 		switch ev.Kind {
 		case transcript.KindUserPrompt:
 			promptNo++
@@ -146,6 +156,32 @@ func writeConversation(b *strings.Builder, s *transcript.Session, opts Options) 
 			writePRLink(b, ev.PR)
 		}
 	}
+}
+
+// writeForkNote renders the callout for a forked session: a link to the parent
+// document (when it's in the corpus) and how much shared history was elided. It
+// sits after the synopsis so it never becomes the indexed summary paragraph.
+func writeForkNote(b *strings.Builder, p, parent *Placement) {
+	s := p.Session
+	if s.ForkedFrom == "" {
+		return
+	}
+	var target string
+	if parent != nil {
+		target = fmt.Sprintf("[%s](<%s>)", oneLine(parent.Session.Title()), hrefEncode(relLink(p.RelPath, parent.RelPath)))
+	} else {
+		target = codeSpan(s.ForkedFrom) + " _(not in this corpus)_"
+	}
+	fmt.Fprintf(b, "> 🍴 Forked from %s — the %s of shared history before this point are not repeated here.\n\n",
+		target, countNoun(s.InheritedMessages, "earlier message"))
+}
+
+func writeBranchMarker(b *strings.Builder, branch string, first bool) {
+	verb := "Switched to"
+	if first {
+		verb = "On"
+	}
+	fmt.Fprintf(b, "> ⎇ %s branch %s\n\n", verb, codeSpan(branch))
 }
 
 func writeThinking(b *strings.Builder, text string, max int) {
@@ -219,13 +255,34 @@ func writeNavigation(b *strings.Builder, p, prev, next *Placement) {
 	b.WriteString("---\n\n")
 	var parts []string
 	if prev != nil {
-		parts = append(parts, fmt.Sprintf("← Previous: [%s](<%s>)", oneLine(prev.Session.Title()), hrefEncode(prev.FileName)))
+		parts = append(parts, fmt.Sprintf("← Previous: [%s](<%s>)", oneLine(prev.Session.Title()), hrefEncode(relLink(p.RelPath, prev.RelPath))))
 	}
 	if next != nil {
-		parts = append(parts, fmt.Sprintf("Next: [%s](<%s>) →", oneLine(next.Session.Title()), hrefEncode(next.FileName)))
+		parts = append(parts, fmt.Sprintf("Next: [%s](<%s>) →", oneLine(next.Session.Title()), hrefEncode(relLink(p.RelPath, next.RelPath))))
 	}
 	b.WriteString(strings.Join(parts, " · "))
 	b.WriteString("\n")
+}
+
+// relLink computes a relative markdown link target from the directory of
+// fromRel to the file toRel (both root-relative, forward-slash). Chronological
+// neighbors can live in different month directories, so a bare filename won't do.
+func relLink(fromRel, toRel string) string {
+	var from []string
+	if dir := path.Dir(fromRel); dir != "." {
+		from = strings.Split(dir, "/")
+	}
+	to := strings.Split(toRel, "/")
+	i := 0
+	for i < len(from) && i < len(to)-1 && from[i] == to[i] {
+		i++
+	}
+	var parts []string
+	for j := i; j < len(from); j++ {
+		parts = append(parts, "..")
+	}
+	parts = append(parts, to[i:]...)
+	return path.Join(parts...)
 }
 
 // --- small helpers ---
