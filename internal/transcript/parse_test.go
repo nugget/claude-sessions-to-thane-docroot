@@ -62,6 +62,7 @@ func TestParseSessionMetadata(t *testing.T) {
 const forkJSONL = `{"type":"custom-title","customTitle":"Fork session","sessionId":"fork99"}
 {"type":"user","sessionId":"parent11","timestamp":"2026-05-01T10:00:00Z","gitBranch":"main","message":{"role":"user","content":"Original parent question."}}
 {"type":"assistant","sessionId":"parent11","timestamp":"2026-05-01T10:00:05Z","gitBranch":"main","message":{"role":"assistant","content":[{"type":"text","text":"Parent answer."}]}}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-05-02T14:29:59Z","sessionId":"fork99"}
 {"type":"user","sessionId":"fork99","timestamp":"2026-05-02T14:30:00Z","gitBranch":"feature/z","message":{"role":"user","content":"Now diverge and do the new thing."}}
 {"type":"assistant","sessionId":"fork99","timestamp":"2026-05-02T14:31:00Z","gitBranch":"feature/z","message":{"role":"assistant","content":[{"type":"text","text":"Doing the new thing."}]}}
 `

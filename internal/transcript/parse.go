@@ -169,15 +169,21 @@ func (p *parser) handle(e *rawEntry) {
 		}
 		return
 	}
+	ts := parseTime(e.Timestamp)
 	if isMessage && !p.ownStarted {
 		p.ownStarted = true
 		if p.inheritedMsgs > 0 {
 			p.sess.ForkedFrom = p.parentID
 			p.sess.InheritedMessages = p.inheritedMsgs
+			// Anchor the fork to its divergence point. Own metadata
+			// (queue-op/title) before the first own message can carry an
+			// earlier timestamp; the fork's work begins here, and from now on
+			// observeMeta leaves StartedAt alone (see the ForkedFrom guard).
+			if !ts.IsZero() {
+				p.sess.StartedAt = ts
+			}
 		}
 	}
-
-	ts := parseTime(e.Timestamp)
 	p.observeMeta(e, ts)
 
 	switch e.Type {
@@ -213,7 +219,10 @@ func sessionIDFromPath(path string) string {
 
 func (p *parser) observeMeta(e *rawEntry, ts time.Time) {
 	if !ts.IsZero() {
-		if p.sess.StartedAt.IsZero() || ts.Before(p.sess.StartedAt) {
+		// For a fork, StartedAt is pinned to the first own message (the
+		// divergence point) and must not drift to an earlier own-metadata
+		// timestamp; for a non-fork it tracks the earliest record as usual.
+		if p.sess.ForkedFrom == "" && (p.sess.StartedAt.IsZero() || ts.Before(p.sess.StartedAt)) {
 			p.sess.StartedAt = ts
 		}
 		if ts.After(p.sess.EndedAt) {
