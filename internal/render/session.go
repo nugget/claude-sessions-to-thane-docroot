@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -54,9 +55,6 @@ func sessionTags(s *transcript.Session) []string {
 	if !s.StartedAt.IsZero() {
 		tags = append(tags, strconv.Itoa(s.StartedAt.UTC().Year()))
 	}
-	if hb := s.HomeBranch(); hb != "" {
-		tags = append(tags, Slug(hb))
-	}
 	if len(s.PRs) > 0 {
 		tags = append(tags, "has-pr")
 	}
@@ -86,16 +84,16 @@ func writeOverview(b *strings.Builder, s *transcript.Session, opts Options) {
 	if when := timeRange(s, loc); when != "" {
 		fmt.Fprintf(b, "- **When:** %s\n", when)
 	}
-	if hb := s.HomeBranch(); hb != "" {
-		line := "`" + hb + "`"
-		if len(s.Branches) > 1 {
-			others := make([]string, 0, len(s.Branches)-1)
-			for _, br := range s.Branches[1:] {
-				others = append(others, "`"+br.Branch+"`")
-			}
-			line += fmt.Sprintf(" — also touched %s", strings.Join(others, ", "))
+	if len(s.Branches) > 0 {
+		names := make([]string, 0, len(s.Branches))
+		for _, br := range s.Branches {
+			names = append(names, "`"+br.Branch+"`")
 		}
-		fmt.Fprintf(b, "- **Branch:** %s\n", line)
+		label := "Branch"
+		if len(names) > 1 {
+			label = "Branches"
+		}
+		fmt.Fprintf(b, "- **%s:** %s\n", label, strings.Join(names, ", "))
 	}
 	if len(s.CWDs) > 0 {
 		dirs := make([]string, len(s.CWDs))
@@ -125,8 +123,15 @@ func writeOverview(b *strings.Builder, s *transcript.Session, opts Options) {
 
 func writeConversation(b *strings.Builder, s *transcript.Session, opts Options) {
 	promptNo := 0
+	currentBranch := ""
 	for i := range s.Events {
 		ev := &s.Events[i]
+		// A session interleaves work across branches; surface each switch so
+		// the movement is visible even though the document isn't filed by branch.
+		if ev.Branch != "" && ev.Branch != currentBranch {
+			writeBranchMarker(b, ev.Branch, currentBranch == "")
+			currentBranch = ev.Branch
+		}
 		switch ev.Kind {
 		case transcript.KindUserPrompt:
 			promptNo++
@@ -146,6 +151,14 @@ func writeConversation(b *strings.Builder, s *transcript.Session, opts Options) 
 			writePRLink(b, ev.PR)
 		}
 	}
+}
+
+func writeBranchMarker(b *strings.Builder, branch string, first bool) {
+	verb := "Switched to"
+	if first {
+		verb = "On"
+	}
+	fmt.Fprintf(b, "> ⎇ %s branch `%s`\n\n", verb, branch)
 }
 
 func writeThinking(b *strings.Builder, text string, max int) {
@@ -219,13 +232,34 @@ func writeNavigation(b *strings.Builder, p, prev, next *Placement) {
 	b.WriteString("---\n\n")
 	var parts []string
 	if prev != nil {
-		parts = append(parts, fmt.Sprintf("← Previous: [%s](<%s>)", oneLine(prev.Session.Title()), hrefEncode(prev.FileName)))
+		parts = append(parts, fmt.Sprintf("← Previous: [%s](<%s>)", oneLine(prev.Session.Title()), hrefEncode(relLink(p.RelPath, prev.RelPath))))
 	}
 	if next != nil {
-		parts = append(parts, fmt.Sprintf("Next: [%s](<%s>) →", oneLine(next.Session.Title()), hrefEncode(next.FileName)))
+		parts = append(parts, fmt.Sprintf("Next: [%s](<%s>) →", oneLine(next.Session.Title()), hrefEncode(relLink(p.RelPath, next.RelPath))))
 	}
 	b.WriteString(strings.Join(parts, " · "))
 	b.WriteString("\n")
+}
+
+// relLink computes a relative markdown link target from the directory of
+// fromRel to the file toRel (both root-relative, forward-slash). Chronological
+// neighbors can live in different month directories, so a bare filename won't do.
+func relLink(fromRel, toRel string) string {
+	var from []string
+	if dir := path.Dir(fromRel); dir != "." {
+		from = strings.Split(dir, "/")
+	}
+	to := strings.Split(toRel, "/")
+	i := 0
+	for i < len(from) && i < len(to)-1 && from[i] == to[i] {
+		i++
+	}
+	var parts []string
+	for j := i; j < len(from); j++ {
+		parts = append(parts, "..")
+	}
+	parts = append(parts, to[i:]...)
+	return path.Join(parts...)
 }
 
 // --- small helpers ---

@@ -46,12 +46,13 @@ func TestExportEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	// root README + branch README + 1 session doc.
+	// root README + month README + 1 session doc.
 	if len(res.Created) != 3 {
 		t.Fatalf("created = %v, want 3 docs", res.Created)
 	}
 
-	sessionDoc := filepath.Join(target, "main", "2026-05-01 test-session.md")
+	// Session at 2026-05-01T12:00:00Z (UTC) → month folder + date-time filename.
+	sessionDoc := filepath.Join(target, "2026-05", "2026-05-01 1200 test-session.md")
 	body := readFile(t, sessionDoc)
 	for _, want := range []string{
 		`title: "Test session"`,
@@ -63,6 +64,7 @@ func TestExportEndToEnd(t *testing.T) {
 		"# Test session",
 		"Investigate the widget.", // synopsis lead paragraph (indexed summary)
 		"Looking into it.",        // assistant prose
+		"> ⎇ On branch `main`",    // inline branch marker
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("session doc missing %q", want)
@@ -73,8 +75,8 @@ func TestExportEndToEnd(t *testing.T) {
 	if !strings.Contains(overview, `document_kind: "transcript_root_overview"`) {
 		t.Error("root overview missing kind")
 	}
-	if !strings.Contains(overview, "main/README.md") {
-		t.Error("root overview should link the branch index")
+	if !strings.Contains(overview, "2026-05/README.md") {
+		t.Error("root overview should link the month index")
 	}
 
 	// Idempotency: a second run changes nothing.
