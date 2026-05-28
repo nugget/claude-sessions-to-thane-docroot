@@ -87,7 +87,7 @@ func writeOverview(b *strings.Builder, s *transcript.Session, opts Options) {
 	if len(s.Branches) > 0 {
 		names := make([]string, 0, len(s.Branches))
 		for _, br := range s.Branches {
-			names = append(names, "`"+br.Branch+"`")
+			names = append(names, codeSpan(br.Branch))
 		}
 		label := "Branch"
 		if len(names) > 1 {
@@ -98,7 +98,7 @@ func writeOverview(b *strings.Builder, s *transcript.Session, opts Options) {
 	if len(s.CWDs) > 0 {
 		dirs := make([]string, len(s.CWDs))
 		for i, d := range s.CWDs {
-			dirs[i] = "`" + d + "`"
+			dirs[i] = codeSpan(d)
 		}
 		fmt.Fprintf(b, "- **Working directory:** %s\n", strings.Join(dirs, ", "))
 	}
@@ -158,7 +158,7 @@ func writeBranchMarker(b *strings.Builder, branch string, first bool) {
 	if first {
 		verb = "On"
 	}
-	fmt.Fprintf(b, "> ⎇ %s branch `%s`\n\n", verb, branch)
+	fmt.Fprintf(b, "> ⎇ %s branch %s\n\n", verb, codeSpan(branch))
 }
 
 func writeThinking(b *strings.Builder, text string, max int) {

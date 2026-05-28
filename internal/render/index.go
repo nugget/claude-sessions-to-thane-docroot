@@ -69,9 +69,9 @@ func writeSessionRow(b *strings.Builder, p *Placement, loc *time.Location) {
 // branchHint renders a compact branch summary for an index row.
 func branchHint(branches []string) string {
 	if len(branches) == 1 {
-		return "`" + branches[0] + "`"
+		return codeSpan(branches[0])
 	}
-	return fmt.Sprintf("`%s` +%d", branches[0], len(branches)-1)
+	return fmt.Sprintf("%s +%d", codeSpan(branches[0]), len(branches)-1)
 }
 
 // RenderRootOverview builds the document-root README for this project: the entry

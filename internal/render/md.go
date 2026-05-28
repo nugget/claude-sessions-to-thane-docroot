@@ -10,8 +10,30 @@ import (
 // itself contain backtick fences (at least 3, always longer than the longest
 // internal run).
 func fence(content string) string {
+	n := longestBacktickRun(content) + 1
+	if n < 3 {
+		n = 3
+	}
+	return strings.Repeat("`", n)
+}
+
+// codeSpan renders s as an inline Markdown code span that survives backticks in
+// the content: the delimiter is one longer than the longest internal backtick
+// run, with surrounding spaces when the content begins or ends with a backtick.
+// Used for untrusted dynamic values (git branch names, paths) that may, however
+// rarely, contain backticks.
+func codeSpan(s string) string {
+	delim := strings.Repeat("`", longestBacktickRun(s)+1)
+	pad := ""
+	if strings.HasPrefix(s, "`") || strings.HasSuffix(s, "`") {
+		pad = " "
+	}
+	return delim + pad + s + pad + delim
+}
+
+func longestBacktickRun(s string) int {
 	longest, cur := 0, 0
-	for _, r := range content {
+	for _, r := range s {
 		if r == '`' {
 			cur++
 			if cur > longest {
@@ -21,11 +43,7 @@ func fence(content string) string {
 			cur = 0
 		}
 	}
-	n := longest + 1
-	if n < 3 {
-		n = 3
-	}
-	return strings.Repeat("`", n)
+	return longest
 }
 
 // writeCodeBlock writes a fenced code block whose fence cannot collide with

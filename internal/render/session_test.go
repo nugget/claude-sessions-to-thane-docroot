@@ -48,3 +48,33 @@ func TestRenderSessionBranchMarkers(t *testing.T) {
 		t.Errorf("expected 3 branch markers (main, feature/y, main), got %d", n)
 	}
 }
+
+func TestRelLink(t *testing.T) {
+	tests := []struct {
+		from, to, want string
+	}{
+		{"2026-05/a.md", "2026-05/b.md", "b.md"},            // same month
+		{"2026-05/a.md", "2026-04/b.md", "../2026-04/b.md"}, // across months
+		{"README.md", "2026-05/b.md", "2026-05/b.md"},       // from root
+		{"2026-05/a.md", "README.md", "../README.md"},       // up to root
+	}
+	for _, tt := range tests {
+		if got := relLink(tt.from, tt.to); got != tt.want {
+			t.Errorf("relLink(%q, %q) = %q, want %q", tt.from, tt.to, got, tt.want)
+		}
+	}
+}
+
+func TestCodeSpanEscapesBackticks(t *testing.T) {
+	tests := map[string]string{
+		"main":         "`main`",      // common case unchanged
+		"feature/y":    "`feature/y`", // slash is fine
+		"weird`branch": "``weird`branch``",
+		"`leading":     "`` `leading ``",
+	}
+	for in, want := range tests {
+		if got := codeSpan(in); got != want {
+			t.Errorf("codeSpan(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
