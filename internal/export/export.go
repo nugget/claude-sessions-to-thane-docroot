@@ -194,6 +194,10 @@ func renderAll(project string, ordered []*render.Placement, months []*render.Mon
 			Content: render.RenderMonthIndex(g, opts),
 		})
 	}
+	byID := make(map[string]*render.Placement, len(ordered))
+	for _, p := range ordered {
+		byID[p.Session.ID] = p
+	}
 	for i, p := range ordered {
 		var prev, next *render.Placement
 		if i > 0 {
@@ -202,9 +206,11 @@ func renderAll(project string, ordered []*render.Placement, months []*render.Mon
 		if i < len(ordered)-1 {
 			next = ordered[i+1]
 		}
+		// parent resolves to the forked-from session when it's also in the corpus.
+		parent := byID[p.Session.ForkedFrom]
 		files = append(files, docroot.File{
 			RelPath: p.RelPath,
-			Content: render.RenderSession(p, prev, next, opts),
+			Content: render.RenderSession(p, prev, next, parent, opts),
 		})
 	}
 	return files

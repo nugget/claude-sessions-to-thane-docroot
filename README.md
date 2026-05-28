@@ -108,6 +108,25 @@ Each session document is a *narrative*, not a JSON dump:
 Chronologically adjacent sessions are linked at the foot of each document
 (← previous / next →), giving the whole corpus a continuous spine across months.
 
+### Forked sessions
+
+Forking a session in the Claude UI writes a new transcript that **copies the
+parent's conversation prefix verbatim** — and those copied records keep the
+*parent's* session id; only the divergent tail carries the fork's own id (which
+is the filename). The exporter handles this so forks don't pollute the corpus:
+
+- the canonical session id comes from the **filename**, so each fork gets its
+  own `conversation:` ref (not the parent's);
+- the session is dated from its **divergence point** (first own message), so
+  forks sort to when their work actually happened — not when the parent began;
+- the copied prefix is **not repeated**; the document renders only the fork's
+  own work, led by a fork note that links the parent and a `forked-from:<id>`
+  source-ref (`> 🍴 Forked from [parent] — N earlier messages … not repeated here`).
+
+A non-forked session has no inherited prefix and is unaffected. The detection is
+data-driven (it only triggers when records actually carry a different id), so it
+degrades gracefully if Claude Code's fork format ever changes.
+
 ## Idempotency / sync model
 
 Output is a deterministic function of the transcripts, so re-running is a

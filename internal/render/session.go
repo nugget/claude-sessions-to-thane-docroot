@@ -11,9 +11,10 @@ import (
 )
 
 // RenderSession produces the full markdown document for one session. prev and
-// next are the chronologically adjacent sessions in the same branch (either may
-// be nil) and are linked for narrative navigation.
-func RenderSession(p *Placement, prev, next *Placement, opts Options) string {
+// next are the chronologically adjacent sessions (either may be nil) and are
+// linked for narrative navigation. parent is the session this one was forked
+// from, when present in the corpus, and is linked from the fork note.
+func RenderSession(p *Placement, prev, next, parent *Placement, opts Options) string {
 	s := p.Session
 
 	var b strings.Builder
@@ -25,6 +26,7 @@ func RenderSession(p *Placement, prev, next *Placement, opts Options) string {
 	b.WriteString(s.Synopsis())
 	b.WriteString("\n\n")
 
+	writeForkNote(&b, p, parent)
 	writeOverview(&b, s, opts)
 
 	b.WriteString("## Conversation\n\n")
@@ -63,6 +65,9 @@ func sessionTags(s *transcript.Session) []string {
 
 func sessionSourceRefs(s *transcript.Session, root string) []string {
 	refs := []string{"conversation:" + s.ID}
+	if s.ForkedFrom != "" {
+		refs = append(refs, "forked-from:"+s.ForkedFrom)
+	}
 	for _, br := range s.TouchedBranches() {
 		refs = append(refs, "branch:"+br)
 	}
@@ -151,6 +156,24 @@ func writeConversation(b *strings.Builder, s *transcript.Session, opts Options) 
 			writePRLink(b, ev.PR)
 		}
 	}
+}
+
+// writeForkNote renders the callout for a forked session: a link to the parent
+// document (when it's in the corpus) and how much shared history was elided. It
+// sits after the synopsis so it never becomes the indexed summary paragraph.
+func writeForkNote(b *strings.Builder, p, parent *Placement) {
+	s := p.Session
+	if s.ForkedFrom == "" {
+		return
+	}
+	var target string
+	if parent != nil {
+		target = fmt.Sprintf("[%s](<%s>)", oneLine(parent.Session.Title()), hrefEncode(relLink(p.RelPath, parent.RelPath)))
+	} else {
+		target = codeSpan(s.ForkedFrom) + " _(not in this corpus)_"
+	}
+	fmt.Fprintf(b, "> 🍴 Forked from %s — the %s of shared history before this point are not repeated here.\n\n",
+		target, countNoun(s.InheritedMessages, "earlier message"))
 }
 
 func writeBranchMarker(b *strings.Builder, branch string, first bool) {
