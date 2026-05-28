@@ -1,0 +1,13 @@
+# Compiled binaries
+/transcript-exporter
+/dist/
+*.exe
+*.test
+*.out
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Editor / OS cruft
+.DS_Store
