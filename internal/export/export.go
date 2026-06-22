@@ -26,6 +26,7 @@ type Config struct {
 	RootName         string
 	IncludeWorktrees bool
 	DryRun           bool
+	Prune            bool
 	IncludeThinking  bool
 	MaxThinkingChars int
 	MaxResultLines   int
@@ -86,6 +87,7 @@ func (c Config) Run() (*docroot.Result, error) {
 	plan := docroot.Plan{
 		TargetDir:   c.TargetDir,
 		OwnedMarker: render.GeneratedBy,
+		Prune:       c.Prune,
 		Files:       renderAll(proj.DisplayName, ordered, months, opts),
 	}
 

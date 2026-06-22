@@ -1,8 +1,15 @@
 // Package docroot reconciles a desired set of generated markdown files against
 // a target directory. The sync is idempotent: a re-run with identical inputs
-// writes nothing. Deletion is bounded to files this tool owns, identified by a
-// frontmatter marker, so hand-authored files, .git, and signing material in the
-// target directory are never touched.
+// writes nothing.
+//
+// By default the target is treated as an ARCHIVE — files this tool previously
+// wrote that no longer have a matching source are listed as orphans in the
+// Result but are NOT deleted. This protects against upstream churn (Claude Code
+// pruning sessions, a worktree dir disappearing) silently destroying history in
+// the target. Set Plan.Prune to opt into a true mirror that deletes orphans and
+// prunes the empty directories left behind. Deletion is always bounded to files
+// carrying this tool's generated_by marker, so hand-authored files, .git, and
+// signing material are never touched.
 package docroot
 
 import (
@@ -26,13 +33,19 @@ type Plan struct {
 	TargetDir   string
 	Files       []File
 	OwnedMarker string // value of generated_by stamped on tool-owned files
+	Prune       bool   // when true, delete owned orphans and prune empty dirs
 }
 
 // Result reports what the reconcile did (or would do, when dry-run).
+//
+// Orphans are owned files that no longer have a matching source: in the default
+// archive mode they are listed but left in place; in prune mode the same set is
+// removed and appears in Deleted instead.
 type Result struct {
 	Created    []string
 	Updated    []string
 	Unchanged  []string
+	Orphans    []string
 	Deleted    []string
 	PrunedDirs []string
 }
@@ -67,16 +80,19 @@ func Sync(plan Plan, dryRun bool, logger *slog.Logger) (*Result, error) {
 	if err := writeDesired(plan, desired, dryRun, res, logger); err != nil {
 		return nil, err
 	}
-	if err := deleteOrphans(plan, desired, dryRun, res, logger); err != nil {
+	if err := handleOrphans(plan, desired, dryRun, res, logger); err != nil {
 		return nil, err
 	}
-	if err := pruneEmptyDirs(plan.TargetDir, dryRun, res); err != nil {
-		return nil, err
+	if plan.Prune {
+		if err := pruneEmptyDirs(plan.TargetDir, dryRun, res); err != nil {
+			return nil, err
+		}
 	}
 
 	sort.Strings(res.Created)
 	sort.Strings(res.Updated)
 	sort.Strings(res.Unchanged)
+	sort.Strings(res.Orphans)
 	sort.Strings(res.Deleted)
 	sort.Strings(res.PrunedDirs)
 	return res, nil
@@ -111,7 +127,13 @@ func writeDesired(plan Plan, desired map[string]string, dryRun bool, res *Result
 	return nil
 }
 
-func deleteOrphans(plan Plan, desired map[string]string, dryRun bool, res *Result, logger *slog.Logger) error {
+// handleOrphans walks the target for owned files that aren't in the desired
+// set. In archive mode (Plan.Prune == false) they're recorded in Result.Orphans
+// and left in place so upstream pruning of source transcripts doesn't take the
+// archived doc with it. In prune mode they're deleted and recorded in
+// Result.Deleted. Either way only files carrying the OwnedMarker are
+// considered.
+func handleOrphans(plan Plan, desired map[string]string, dryRun bool, res *Result, logger *slog.Logger) error {
 	walkErr := filepath.WalkDir(plan.TargetDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -138,6 +160,11 @@ func deleteOrphans(plan Plan, desired map[string]string, dryRun bool, res *Resul
 			return ownErr
 		}
 		if !owned {
+			return nil
+		}
+		if !plan.Prune {
+			res.Orphans = append(res.Orphans, rel)
+			logger.Debug("orphan kept (archive mode; pass --prune to remove)", "path", rel)
 			return nil
 		}
 		res.Deleted = append(res.Deleted, rel)

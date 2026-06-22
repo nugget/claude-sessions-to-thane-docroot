@@ -40,6 +40,7 @@ func run() error {
 		rootName    = flag.String("root-name", "", "override the thane root name for frontmatter/refs (default: basename of --root or --target)")
 		worktrees   = flag.Bool("worktrees", true, "merge worktree-sibling project dirs into the same root")
 		dryRun      = flag.Bool("dry-run", false, "report changes without writing to disk")
+		prune       = flag.Bool("prune", false, "delete owned files whose source transcript is gone (default: leave them as archive)")
 		thinking    = flag.Bool("thinking", true, "include assistant thinking blocks in the narrative")
 		maxThinking = flag.Int("max-thinking-chars", 0, "cap per thinking block (0 = default)")
 		maxResLines = flag.Int("max-result-lines", 0, "cap tool-result text at N lines (0 = default)")
@@ -76,6 +77,7 @@ func run() error {
 		RootName:         resolvedRootName,
 		IncludeWorktrees: *worktrees,
 		DryRun:           *dryRun,
+		Prune:            *prune,
 		IncludeThinking:  *thinking,
 		MaxThinkingChars: *maxThinking,
 		MaxResultLines:   *maxResLines,
@@ -157,4 +159,7 @@ func printSummary(r *docroot.Result, dryRun bool) {
 	}
 	fmt.Printf("%s: %d created, %d updated, %d unchanged, %d deleted, %d dirs pruned\n",
 		verb, len(r.Created), len(r.Updated), len(r.Unchanged), len(r.Deleted), len(r.PrunedDirs))
+	if n := len(r.Orphans); n > 0 {
+		fmt.Printf("%d orphan(s) kept (no matching source; pass --prune to remove, --verbose to list)\n", n)
+	}
 }
