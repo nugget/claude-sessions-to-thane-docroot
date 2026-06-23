@@ -40,7 +40,7 @@ func run() error {
 		rootName    = flag.String("root-name", "", "override the thane root name for frontmatter/refs (default: basename of --root or --target)")
 		worktrees   = flag.Bool("worktrees", true, "merge worktree-sibling project dirs into the same root")
 		dryRun      = flag.Bool("dry-run", false, "report changes without writing to disk")
-		prune       = flag.Bool("prune", false, "delete owned files whose source transcript is gone (default: leave them as archive)")
+		prune       = flag.Bool("prune", false, "delete owned files this run did not produce (default: leave them in place as archive)")
 		thinking    = flag.Bool("thinking", true, "include assistant thinking blocks in the narrative")
 		maxThinking = flag.Int("max-thinking-chars", 0, "cap per thinking block (0 = default)")
 		maxResLines = flag.Int("max-result-lines", 0, "cap tool-result text at N lines (0 = default)")

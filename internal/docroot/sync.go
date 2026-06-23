@@ -2,14 +2,16 @@
 // a target directory. The sync is idempotent: a re-run with identical inputs
 // writes nothing.
 //
-// By default the target is treated as an ARCHIVE — files this tool previously
-// wrote that no longer have a matching source are listed as orphans in the
-// Result but are NOT deleted. This protects against upstream churn (Claude Code
-// pruning sessions, a worktree dir disappearing) silently destroying history in
-// the target. Set Plan.Prune to opt into a true mirror that deletes orphans and
-// prunes the empty directories left behind. Deletion is always bounded to files
-// carrying this tool's generated_by marker, so hand-authored files, .git, and
-// signing material are never touched.
+// By default the target is treated as an ARCHIVE — owned files this tool
+// previously wrote that the current run did NOT produce are listed as orphans
+// in the Result but are NOT deleted. That criterion is purely about the current
+// render plan: an upstream session being pruned is the common case, but a
+// transcript that failed to parse, was filtered, or was simply not visible this
+// run would surface the same way — none of those are good reasons to drop
+// archived history. Set Plan.Prune to opt into a true mirror that deletes
+// orphans and prunes the empty directories left behind. Deletion is always
+// bounded to files carrying this tool's generated_by marker, so hand-authored
+// files, .git, and signing material are never touched.
 package docroot
 
 import (
@@ -38,9 +40,10 @@ type Plan struct {
 
 // Result reports what the reconcile did (or would do, when dry-run).
 //
-// Orphans are owned files that no longer have a matching source: in the default
-// archive mode they are listed but left in place; in prune mode the same set is
-// removed and appears in Deleted instead.
+// Orphans are owned files that the current render plan did not produce
+// (whatever the reason — upstream pruning, a parse failure, a filter, anything).
+// In the default archive mode they are listed but left in place; in prune mode
+// the same set is removed and appears in Deleted instead.
 type Result struct {
 	Created    []string
 	Updated    []string
@@ -128,11 +131,12 @@ func writeDesired(plan Plan, desired map[string]string, dryRun bool, res *Result
 }
 
 // handleOrphans walks the target for owned files that aren't in the desired
-// set. In archive mode (Plan.Prune == false) they're recorded in Result.Orphans
-// and left in place so upstream pruning of source transcripts doesn't take the
-// archived doc with it. In prune mode they're deleted and recorded in
-// Result.Deleted. Either way only files carrying the OwnedMarker are
-// considered.
+// set this run — whatever the reason they're missing from it. In archive mode
+// (Plan.Prune == false) they're recorded in Result.Orphans and left in place,
+// so a transient blip (upstream prune, parse failure, filtered transcript) does
+// not silently destroy archived history. In prune mode they're deleted and
+// recorded in Result.Deleted. Either way only files carrying the OwnedMarker
+// are considered.
 func handleOrphans(plan Plan, desired map[string]string, dryRun bool, res *Result, logger *slog.Logger) error {
 	walkErr := filepath.WalkDir(plan.TargetDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
