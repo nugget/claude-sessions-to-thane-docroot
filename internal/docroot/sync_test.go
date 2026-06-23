@@ -22,6 +22,12 @@ func mkPlan(dir string, files ...File) Plan {
 	return Plan{TargetDir: dir, OwnedMarker: marker, Files: files}
 }
 
+func mkPrunePlan(dir string, files ...File) Plan {
+	p := mkPlan(dir, files...)
+	p.Prune = true
+	return p
+}
+
 func read(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -75,7 +81,7 @@ func TestSyncDeletesOwnedOrphansAndPrunes(t *testing.T) {
 	dir := t.TempDir()
 	log := quietLogger()
 
-	full := mkPlan(dir,
+	full := mkPrunePlan(dir,
 		File{RelPath: "README.md", Content: owned("root")},
 		File{RelPath: "feat/x/old.md", Content: owned("old")},
 	)
@@ -83,9 +89,9 @@ func TestSyncDeletesOwnedOrphansAndPrunes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Drop the branch file from the plan; it should be deleted and its now-empty
-	// directories pruned.
-	reduced := mkPlan(dir, File{RelPath: "README.md", Content: owned("root")})
+	// Drop the branch file from the plan; with --prune it should be deleted and
+	// its now-empty directories pruned.
+	reduced := mkPrunePlan(dir, File{RelPath: "README.md", Content: owned("root")})
 	res, err := Sync(reduced, false, log)
 	if err != nil {
 		t.Fatal(err)
@@ -95,6 +101,38 @@ func TestSyncDeletesOwnedOrphansAndPrunes(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "feat")); !os.IsNotExist(err) {
 		t.Errorf("expected pruned empty dir feat/, stat err = %v", err)
+	}
+}
+
+// TestSyncArchiveModeKeepsOrphans guards the post-incident default: when the
+// source shrinks (e.g. Claude Code pruned an upstream session), the previously
+// archived doc is reported as an orphan but left in place. This is the contract
+// that lets the target stand as a permanent archive of historical sessions.
+func TestSyncArchiveModeKeepsOrphans(t *testing.T) {
+	dir := t.TempDir()
+	log := quietLogger()
+
+	full := mkPlan(dir,
+		File{RelPath: "README.md", Content: owned("root")},
+		File{RelPath: "feat/x/old.md", Content: owned("old")},
+	)
+	if _, err := Sync(full, false, log); err != nil {
+		t.Fatal(err)
+	}
+
+	reduced := mkPlan(dir, File{RelPath: "README.md", Content: owned("root")})
+	res, err := Sync(reduced, false, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Deleted) != 0 || len(res.PrunedDirs) != 0 {
+		t.Fatalf("archive mode must not delete or prune: %+v", res)
+	}
+	if len(res.Orphans) != 1 || res.Orphans[0] != "feat/x/old.md" {
+		t.Fatalf("expected orphan reported: %+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "feat", "x", "old.md")); err != nil {
+		t.Errorf("orphan file must remain on disk in archive mode: %v", err)
 	}
 }
 

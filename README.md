@@ -85,6 +85,7 @@ directory name.
 | `--root-name` | basename of `--root`/`--target` | Override the Thane root name in frontmatter (`managed_root`) and `<root>:` refs. |
 | `--worktrees` | `true` | Merge worktree-sibling project dirs into the same root. |
 | `--dry-run` | `false` | Report what would change; write nothing. |
+| `--prune` | `false` | Delete owned docs **this run did not produce** (and prune empty dirs). Default leaves them in place as archive. |
 | `--thinking` | `true` | Include assistant thinking blocks in the narrative. |
 | `--max-thinking-chars` | `1600` | Cap per thinking block. |
 | `--max-result-lines` | `30` | Cap tool-result text (lines). |
@@ -134,11 +135,17 @@ push-sync of the project's subtree (each export is confined to its own
 `<agent>/<project>/` directory):
 
 - a file is written only when its bytes actually change;
-- documents this tool owns (identified by the `generated_by:
-  "session-transcript-exporter"` frontmatter marker) that are no longer produced
-  are **deleted**, and emptied directories are pruned;
-- files *without* that marker — your own notes, `.git`, signing material — are
-  never touched.
+- files *without* the `generated_by: "session-transcript-exporter"` frontmatter
+  marker — your own notes, `.git`, signing material — are never touched.
+
+**The target is treated as an archive by default.** Upstream is volatile —
+Claude Code prunes old sessions, worktree dirs come and go, and a transcript can
+fail to parse on a given run — but the document root is meant to be the durable
+history. So when an owned doc is not produced by the current run (whatever the
+reason), the run *reports* it as an orphan (count in the summary, paths at
+`--verbose`) and **leaves it on disk**. Pass `--prune` to opt into a true mirror
+that deletes those orphans and the empty directories they leave behind — useful
+for cleaning up after renames, not something to run on autopilot.
 
 The tool performs **no git operations**. If you want Thane's
 `verify_signatures: required` policy, you commit and sign the target directory
